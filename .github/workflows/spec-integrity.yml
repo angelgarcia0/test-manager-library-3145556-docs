@@ -1,0 +1,72 @@
+name: spec-integrity
+
+# The normative spec is the input of the exercise, not something a solution edits.
+# This job fails the build if a pull request touches it.
+
+on:
+  pull_request:
+    paths:
+      - 'spec-python/**'
+      - 'spec-.net/**'
+      - 'README.md'
+  push:
+    branches: [ main, dev ]
+
+jobs:
+  normative-spec-untouched:
+    name: normative spec is untouched
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the upstream spec
+        run: |
+          git remote add upstream https://github.com/code-sena/test-manager-library-3145556-docs.git
+          git fetch --no-tags upstream main
+
+      - name: Show what changed in the normative files
+        run: git diff --stat upstream/main -- spec-python spec-.net README.md
+
+      - name: Fail if the normative spec or the root README changed
+        run: |
+          if ! git diff --exit-code upstream/main -- spec-python spec-.net README.md; then
+            echo "::error::The normative spec must not be modified."
+            echo "spec-python/, spec-.net/ and the root README.md are the exercise input."
+            echo "Put technology translations under spec-laravel/ instead."
+            exit 1
+          fi
+          echo "spec-python/, spec-.net/ and README.md are byte-identical to upstream."
+
+  internal-links:
+    name: internal links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check relative links under spec-laravel
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          link = re.compile(r'\]\(([^)]+)\)')
+          broken = []
+
+          for path in sorted(pathlib.Path('spec-laravel').rglob('*.md')):
+              for target in link.findall(path.read_text(encoding='utf-8')):
+                  if target.startswith(('http://', 'https://', 'mailto:', '#')):
+                      continue
+                  resolved = (path.parent / target.split('#')[0]).resolve()
+                  if not resolved.exists():
+                      broken.append(f'{path} -> {target}')
+
+          if broken:
+              print('::error::Broken internal links:')
+              for item in broken:
+                  print(f'  {item}')
+              sys.exit(1)
+
+          print('All internal links under spec-laravel resolve.')
+          PY
